@@ -1,7 +1,33 @@
 import os
 from functools import lru_cache
 from typing import List
+from urllib.parse import urlsplit
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(raw_url: str) -> str:
+    """Normalize PostgreSQL URLs to use psycopg3 (postgresql+psycopg://) and guard empty strings."""
+    cleaned = (raw_url or "").strip()
+    if not cleaned:
+        return "sqlite:///./smartnav.db"
+    if cleaned.startswith("postgres://"):
+        return "postgresql+psycopg://" + cleaned[len("postgres://") :]
+    if cleaned.startswith("postgresql://"):
+        return "postgresql+psycopg://" + cleaned[len("postgresql://") :]
+    return cleaned
+
+
+def mask_database_url(url: str) -> str:
+    """Return a safe representation of DATABASE_URL with password redacted for logs."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.password:
+            netloc = parsed.netloc.replace(f":{parsed.password}@", ":***@")
+            return parsed._replace(netloc=netloc).geturl()
+        return url
+    except Exception:
+        return "<invalid-database-url>"
 
 
 class Settings(BaseSettings):
@@ -18,8 +44,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
-    # PostgreSQL + PostGIS in production; defaults to local SQLite if DATABASE_URL isn't set
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./smartnav.db")
+    # PostgreSQL + PostGIS required in production; SQLite is allowed only in local dev/test
+    DATABASE_URL: str = "sqlite:///./smartnav.db"
+    ALLOW_SQLITE_IN_PRODUCTION: bool = False
+    DB_INIT_ON_STARTUP: bool = True
 
     CORS_ORIGINS: str = "http://localhost:5173,https://localhost:5173,http://127.0.0.1:5173"
 
@@ -37,6 +65,23 @@ class Settings(BaseSettings):
     REROUTE_COOLDOWN_SECONDS: int = 120
     MIN_TIME_SAVING_SECONDS: int = 300
     MIN_RELATIVE_IMPROVEMENT: float = 0.10
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _normalize_db_url(cls, value: str) -> str:
+        return normalize_database_url(value)
+
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV.strip().lower() == "production" or os.getenv("VERCEL") == "1"
+
+    def validate_database_configuration(self) -> None:
+        if self.is_production and self.DATABASE_URL.startswith("sqlite") and not self.ALLOW_SQLITE_IN_PRODUCTION:
+            raise RuntimeError(
+                "DATABASE_URL is not configured for production (refusing SQLite fallback on read-only/ephemeral "
+                "production filesystem). Set DATABASE_URL to a PostgreSQL/PostGIS URL (e.g. "
+                "postgresql+psycopg://user:password@host:5432/dbname?sslmode=require) on your backend host."
+            )
 
     @property
     def cors_origins_list(self) -> List[str]:

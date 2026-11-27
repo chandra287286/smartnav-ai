@@ -2,7 +2,7 @@ services:
   - type: web
     name: smartnav-ai-backend
     runtime: python
-    rootDir: smartnav-ai/backend
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
@@ -16,4 +16,8 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+      - key: TRAFFIC_PROVIDER
+        value: tomtom
+      - key: TOMTOM_API_KEY
         sync: false

@@ -83,17 +83,25 @@ Use Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:5173`) or ngro
 
 ## 3. Production Deployment (Vercel + Render + Supabase)
 
+> **Important Architecture Separation:** Deploy **only** the React Vite frontend on **Vercel** (`frontend/`), deploy the FastAPI backend on **Render** (`backend/`), and host PostgreSQL + PostGIS on **Supabase** (or Render Postgres with PostGIS). Do **not** deploy the FastAPI backend as a Vercel Serverless Function, because Vercel's `/var/task` filesystem is read-only and SQLite is unsuitable for persistent production user data.
+
 1. **Database (Supabase PostgreSQL + PostGIS)**:
    - Create a Supabase project.
    - Enable the `postgis` extension in Supabase SQL Editor: `CREATE EXTENSION IF NOT EXISTS postgis;`
-   - Copy the Postgres connection string (`postgresql+psycopg://postgres:<PASSWORD>@db.<PROJECT>.supabase.co:5432/postgres`).
+   - Copy the Postgres connection string (`postgresql+psycopg://postgres:<PASSWORD>@db.<PROJECT>.supabase.co:5432/postgres?sslmode=require`). (`postgres://` and `postgresql://` URLs are also normalized automatically to `postgresql+psycopg://`.)
 
 2. **Backend (Render)**:
-   - Connect the repository using `render.yaml` (`rootDir: smartnav-ai/backend`).
-   - Set `DATABASE_URL` to your Supabase connection string and `CORS_ORIGINS` to your Vercel HTTPS domain (`https://your-app.vercel.app`).
+   - Connect your GitHub repository using `render.yaml` (`rootDir: backend`).
+   - Configure required environment variables on Render:
+     - `APP_ENV=production`
+     - `DEBUG=false`
+     - `SECRET_KEY=<long-random-secret>`
+     - `DATABASE_URL=<Supabase PostgreSQL connection string>`
+     - `CORS_ORIGINS=https://your-app.vercel.app`
+     - `TOMTOM_API_KEY=<your-tomtom-key>` *(optional; enables live traffic)*
    - Render runs `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 
 3. **Frontend (Vercel)**:
-   - Set Root Directory to `smartnav-ai/frontend`.
+   - Set **Root Directory** to `frontend` (a root-level `vercel.json` is also included so Vercel builds `frontend/dist` and never executes Python `backend/` code).
    - Add environment variable `VITE_API_BASE_URL=https://your-render-backend.onrender.com/api`.
    - Deploy (`vercel.json` handles SPA routing and `Permissions-Policy: geolocation=(self)` over HTTPS).

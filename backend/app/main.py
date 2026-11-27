@@ -17,7 +17,10 @@ logger = logging.getLogger("smartnav.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing SmartNav AI database and services...")
-    init_db()
+    if settings.DB_INIT_ON_STARTUP:
+        init_db()
+    else:
+        logger.info("Skipping init_db() because DB_INIT_ON_STARTUP is false.")
     yield
     logger.info("Shutting down SmartNav AI backend.")
 
